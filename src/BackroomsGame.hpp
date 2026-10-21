@@ -18,13 +18,13 @@
 #include "Microsoft/Xna/Framework/Graphics/BasicEffect.hpp"
 #include "Microsoft/Xna/Framework/Graphics/BlendState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexBuffer.hpp"
-#include "Microsoft/Xna/Framework/Input/Keyboard.hpp"
 
 #include "CnaEngine/Graphics/Camera.hpp"
 #include "CnaEngine/Graphics/ForwardRenderer.hpp"
 #include "CnaEngine/Graphics/GpuMesh.hpp"
 #include "CnaEngine/Graphics/Material.hpp"
 #include "CnaEngine/Graphics/RenderQueue.hpp"
+#include "CnaEngine/Input/ActionMap.hpp"
 
 namespace Backrooms {
 
@@ -99,7 +99,11 @@ private:
     LevelCatalog levelCatalog_;
     RoomLayoutCache roomLayouts_;
     WorldConfig world_;
-    Microsoft::Xna::Framework::Input::KeyboardState previousKeys_;
+    // Keys and buttons as engine actions and axes; mouse look reads the
+    // relative motion CNA reports directly.
+    CnaEngine::Input::ActionMap controls_;
+    CnaEngine::Input::AxisId moveAxis_ = 0, strafeAxis_ = 0;
+    CnaEngine::Input::ActionId runToggle_ = 0, releaseMouse_ = 0, respawn_ = 0, recapture_ = 0;
     double x_ = 2.5, z_ = 2.5;
     float yaw_ = 1.5707963f, pitch_ = 0;
     float verticalFovDegrees_ = kDefaultVerticalFov;

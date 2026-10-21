@@ -36,7 +36,6 @@
 #include "Microsoft/Xna/Framework/Graphics/SamplerState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/SamplerStateCollection.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexPositionColorTexture.hpp"
-#include "Microsoft/Xna/Framework/Input/ButtonState.hpp"
 #include "Microsoft/Xna/Framework/Input/Keys.hpp"
 #include "Microsoft/Xna/Framework/Input/Mouse.hpp"
 
@@ -886,6 +885,22 @@ BackroomsGame::BackroomsGame(std::uint64_t seed, bool streamTest,
     verticalFovDegrees_=verticalFovDegrees;
     yaw_=startLevel==2 ? 0.0f : 1.5707963f;
     entityDepthOnlyBlend_.setColorWriteChannelsProperty(ColorWriteChannels::None);
+    using CnaEngine::Input::AxisBinding;
+    using CnaEngine::Input::Binding;
+    moveAxis_=controls_.AddAxis("Move");
+    controls_.BindAxis(moveAxis_,AxisBinding::ForKeys(Keys::S,Keys::W));
+    strafeAxis_=controls_.AddAxis("Strafe");
+    controls_.BindAxis(strafeAxis_,AxisBinding::ForKeys(Keys::A,Keys::D));
+    // Either Shift toggles; holding one while pressing the other does not.
+    runToggle_=controls_.AddAction("ToggleRun");
+    controls_.Bind(runToggle_,Binding::ForKey(Keys::LeftShift));
+    controls_.Bind(runToggle_,Binding::ForKey(Keys::RightShift));
+    releaseMouse_=controls_.AddAction("ReleaseMouse");
+    controls_.Bind(releaseMouse_,Binding::ForKey(Keys::Escape));
+    respawn_=controls_.AddAction("Respawn");
+    controls_.Bind(respawn_,Binding::ForKey(Keys::R));
+    recapture_=controls_.AddAction("CaptureMouse");
+    controls_.Bind(recapture_,Binding::ForMouse(CnaEngine::Input::MouseButton::Left));
     graphics_.setPreferredBackBufferWidthProperty(1280);
     graphics_.setPreferredBackBufferHeightProperty(720);
     graphics_.setSynchronizeWithVerticalRetraceProperty(true);
@@ -1777,23 +1792,21 @@ void BackroomsGame::Update(GameTime& time) {
         Game::Update(time);
         return;
     }
-    const auto keys=Keyboard::GetState();
-    const bool shiftDown=keys.IsKeyDown(Keys::LeftShift) ||
-                         keys.IsKeyDown(Keys::RightShift);
-    const bool wasShiftDown=previousKeys_.IsKeyDown(Keys::LeftShift) ||
-                            previousKeys_.IsKeyDown(Keys::RightShift);
-    if (shiftDown && !wasShiftDown)
+    // Focus is not passed on: as before, keys count whether or not the window
+    // is active, and a click that activates the window also recaptures it.
+    const auto input=CnaEngine::Input::InputSnapshot::Capture();
+    controls_.Update(input);
+    if (controls_.Pressed(runToggle_))
         running_=!running_;
-    if (keys.IsKeyDown(Keys::Escape) && previousKeys_.IsKeyUp(Keys::Escape)) {
+    if (controls_.Pressed(releaseMouse_)) {
         if (captured_) {
             captured_=false;
             Mouse::setIsRelativeMouseModeEXTProperty(false);
             setIsMouseVisibleProperty(true);
         } else Exit();
     }
-    auto mouse=Mouse::GetState();
-    const bool recaptured=!captured_ &&
-                          mouse.getLeftButtonProperty()==ButtonState::Pressed;
+    const auto& mouse=input.mouse;
+    const bool recaptured=!captured_ && controls_.Held(recapture_);
     if (recaptured) {
         captured_=true;
         Mouse::setIsRelativeMouseModeEXTProperty(true);
@@ -1808,8 +1821,8 @@ void BackroomsGame::Update(GameTime& time) {
             yaw_ -= mouse.getXProperty()*0.0022f;
             pitch_=std::clamp(pitch_-mouse.getYProperty()*0.0022f,-1.43f,1.43f);
         }
-        double forward=(keys.IsKeyDown(Keys::W)?1.0:0.0)-(keys.IsKeyDown(Keys::S)?1.0:0.0);
-        double strafe=(keys.IsKeyDown(Keys::D)?1.0:0.0)-(keys.IsKeyDown(Keys::A)?1.0:0.0);
+        double forward=controls_.Axis(moveAxis_);
+        double strafe=controls_.Axis(strafeAxis_);
         const double length=std::hypot(forward,strafe);
         if (length>0) { forward/=length; strafe/=length; }
         const double speed=(running_?runSpeed_:walkSpeed_)*dt;
@@ -1831,7 +1844,7 @@ void BackroomsGame::Update(GameTime& time) {
             }
         }
     }
-    if (keys.IsKeyDown(Keys::R) && previousKeys_.IsKeyUp(Keys::R)) {
+    if (controls_.Pressed(respawn_)) {
         x_=2.5; z_=2.5;
         yaw_=world_.level==2 ? 0.0f : 1.5707963f;
         pitch_=0;
@@ -1843,7 +1856,6 @@ void BackroomsGame::Update(GameTime& time) {
     Stream();
     UpdateEntityAudio(static_cast<float>(time.getTotalGameTimeProperty().getTotalSecondsProperty()),dt);
     UpdateTitle(dt);
-    previousKeys_=keys;
     Game::Update(time);
 }
 
