@@ -7,6 +7,7 @@
 #include <chrono>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "Microsoft/Xna/Framework/Game.hpp"
@@ -35,6 +36,11 @@ public:
                            float verticalFovDegrees = kDefaultVerticalFov,
                            int multiSampleCount = 4, int streamTestLoops = 1);
     ~BackroomsGame() override;
+    // Deterministic capture: once the 5 by 5 neighborhood is loaded, draw one
+    // frame with creatures posed at `seconds`, save it as PNG and exit. No
+    // input, mouse capture or wall-clock time reaches the frame.
+    void RequestCapture(std::string path, float seconds);
+    void SetView(float yawDegrees, float pitchDegrees);
     const std::string& GetTypeName() const override;
     void Initialize() override;
     void LoadContent() override;
@@ -107,6 +113,9 @@ private:
     double streamTestTime_ = 0;
     int bufferCreations_ = 0;
     int bufferReuses_ = 0;
+    std::string capturePath_;
+    float captureSeconds_ = 0;
+    bool captureDone_ = false;
 
     void BuildChunk(ChunkCoord coord);
     void BuildEntityMesh();
@@ -118,6 +127,7 @@ private:
     void Transition(int level);
     void UpdateTitle(double elapsed);
     void RecordDrawInterval();
+    void SaveCapture();
 };
 
 } // namespace Backrooms

@@ -12,6 +12,8 @@ Repeated screenshot rounds cover six Level 0 locations and three each in Levels 
 
 Actual controller returns cover 1.16 km in Level 0 and 449 m on the current tunnel material, with longer earlier family-specific walks. Streaming sweeps reach 9.6 km in the offices and 28.8 km in the tunnels with bounded chunks/buffer pools. Exact timings, memory ranges and limitations are retained in [validation history](validation-history.md) and the current status. These are finite observations, not unlimited-duration guarantees.
 
+For before/after comparisons of rendering changes, the game captures one frame by itself: `./build/cna_backrooms --seed 12345 --level 0 --position 2.5 2.5 --view 90 0 --capture build/l0_spawn.png`. It needs no window manager or input and repeats byte for byte on one machine and renderer (checked twice over 30 views on Mesa llvmpipe under Xvfb and on the Radeon 780M through SDL's offscreen driver). `world_quality --entities` lists positions and headings facing creatures.
+
 For a real-controller return walk, build `world_route`, generate a route and feed it to the driver:
 
 ```sh

@@ -30,14 +30,20 @@
 #include "Microsoft/Xna/Framework/Graphics/EffectPassCollection.hpp"
 #include "Microsoft/Xna/Framework/Graphics/EffectTechnique.hpp"
 #include "Microsoft/Xna/Framework/Graphics/GraphicsDevice.hpp"
+#include "Microsoft/Xna/Framework/Graphics/GraphicsProfile.hpp"
+#include "Microsoft/Xna/Framework/Graphics/PresentationParameters.hpp"
 #include "Microsoft/Xna/Framework/Graphics/PrimitiveType.hpp"
 #include "Microsoft/Xna/Framework/Graphics/RasterizerState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/SamplerState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/SamplerStateCollection.hpp"
+#include "Microsoft/Xna/Framework/Graphics/Texture2D.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexPositionColorTexture.hpp"
 #include "Microsoft/Xna/Framework/Input/ButtonState.hpp"
 #include "Microsoft/Xna/Framework/Input/Keys.hpp"
 #include "Microsoft/Xna/Framework/Input/Mouse.hpp"
+#include "System/IO/FileAccess.hpp"
+#include "System/IO/FileMode.hpp"
+#include "System/IO/FileStream.hpp"
 
 namespace Backrooms {
 using namespace Microsoft::Xna::Framework;
@@ -908,6 +914,23 @@ BackroomsGame::~BackroomsGame() {
     effect_.reset();
 }
 
+void BackroomsGame::RequestCapture(std::string path, float seconds) {
+    if (path.empty() || !std::isfinite(seconds) || seconds<0)
+        throw std::invalid_argument("invalid capture file or creature time");
+    capturePath_=std::move(path);
+    captureSeconds_=seconds;
+    // XNA reads the back buffer only under the HiDef profile.
+    graphics_.setGraphicsProfileProperty(GraphicsProfile::HiDef);
+}
+
+void BackroomsGame::SetView(float yawDegrees, float pitchDegrees) {
+    if (!std::isfinite(yawDegrees) || !std::isfinite(pitchDegrees) ||
+        std::abs(pitchDegrees)>81.9f)
+        throw std::invalid_argument("invalid view direction");
+    yaw_=yawDegrees*0.01745329252f;
+    pitch_=pitchDegrees*0.01745329252f;
+}
+
 const std::string& BackroomsGame::GetTypeName() const {
     static const std::string name = "Backrooms.BackroomsGame";
     return name;
@@ -930,9 +953,11 @@ void BackroomsGame::LoadContent() {
     effect_->setFogEnabledProperty(true);
     effect_->setFogStartProperty(LevelInfo(world_).fogStart);
     effect_->setFogEndProperty(LevelInfo(world_).fogEnd);
-    setIsMouseVisibleProperty(false);
-    Mouse::setIsRelativeMouseModeEXTProperty(true);
-    captured_ = true;
+    if (capturePath_.empty()) {
+        setIsMouseVisibleProperty(false);
+        Mouse::setIsRelativeMouseModeEXTProperty(true);
+        captured_ = true;
+    }
     BuildEntityMesh();
     BuildChunk(ChunkAt(x_,z_));
     try {
@@ -1731,6 +1756,12 @@ void BackroomsGame::Update(GameTime& time) {
         Game::Update(time);
         return;
     }
+    if (!capturePath_.empty()) {
+        // The player stands still; only streaming advances, one chunk per update.
+        Stream();
+        Game::Update(time);
+        return;
+    }
     const auto keys=Keyboard::GetState();
     const bool shiftDown=keys.IsKeyDown(Keys::LeftShift) ||
                          keys.IsKeyDown(Keys::RightShift);
@@ -1857,7 +1888,7 @@ void BackroomsGame::Draw(const GameTime& time) {
         }
     }
     effect_->setTextureProperty(materials_->Get(Material::Upholstery));
-    const float seconds=static_cast<float>(
+    const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
         time.getTotalGameTimeProperty().getTotalSecondsProperty());
     nearestEntityDistance_=0;
     nearestEntityOpacity_=0;
@@ -1929,6 +1960,28 @@ void BackroomsGame::Draw(const GameTime& time) {
     }
     Game::Draw(time);
     drawWorkMs_=std::chrono::duration<double,std::milli>(Clock::now()-drawStart).count();
+    if (!capturePath_.empty() && !captureDone_ && chunks_.size()==25) {
+        SaveCapture();
+        captureDone_=true;
+        Exit();
+    }
+}
+
+void BackroomsGame::SaveCapture() {
+    // Read before Present, while the back buffer holds this frame.
+    auto& device=getGraphicsDeviceProperty();
+    const auto& parameters=device.getPresentationParametersProperty();
+    const int width=parameters.getBackBufferWidthProperty();
+    const int height=parameters.getBackBufferHeightProperty();
+    std::vector<Color> pixels(static_cast<std::size_t>(width)*static_cast<std::size_t>(height));
+    device.GetBackBufferData(pixels.data(),static_cast<int>(pixels.size()));
+    Texture2D image(device,width,height);
+    image.SetData(pixels.data(),static_cast<int>(pixels.size()));
+    System::IO::FileStream stream(capturePath_,System::IO::FileMode::Create,
+                                  System::IO::FileAccess::Write);
+    image.SaveAsPng(&stream,width,height);
+    std::cout << "Captured " << capturePath_ << ' ' << width << 'x' << height
+              << ", " << drawnChunks_ << " chunks drawn\n";
 }
 
 } // namespace Backrooms
