@@ -1709,14 +1709,9 @@ void BackroomsGame::UpdateTitle(double elapsed) {
     statsTime_+=elapsed;
     ++updateCount_;
     if (statsTime_<1.0) return;
-    auto sorted=drawIntervals_;
-    std::sort(sorted.begin(),sorted.begin()+drawIntervalCount_);
-    double total=0;
-    for (std::size_t i=0;i<drawIntervalCount_;++i) total+=sorted[i];
-    const double fps=total>0 ? 1000.0*drawIntervalCount_/total : 0;
-    const double p95=drawIntervalCount_ ?
-        sorted[(drawIntervalCount_*95+99)/100-1] : 0;
-    const double maximum=drawIntervalCount_ ? sorted[drawIntervalCount_-1] : 0;
+    const double fps=drawIntervals_.FramesPerSecond();
+    const double p95=drawIntervals_.PercentileSeconds(0.95)*1000.0;
+    const double maximum=drawIntervals_.MaxSeconds()*1000.0;
     int triangles=0,entities=0;
     std::size_t vertexCapacity=0;
     for (const auto& [coord,chunk]:chunks_) {
@@ -1861,12 +1856,8 @@ void BackroomsGame::Update(GameTime& time) {
 
 void BackroomsGame::RecordDrawInterval() {
     const auto now=Clock::now();
-    if (lastDraw_!=Clock::time_point{}) {
-        drawIntervals_[nextDrawInterval_]=
-            std::chrono::duration<double,std::milli>(now-lastDraw_).count();
-        nextDrawInterval_=(nextDrawInterval_+1)%drawIntervals_.size();
-        drawIntervalCount_=std::min(drawIntervalCount_+1,drawIntervals_.size());
-    }
+    if (lastDraw_!=Clock::time_point{})
+        drawIntervals_.AddFrame(std::chrono::duration<double>(now-lastDraw_).count());
     lastDraw_=now;
 }
 
@@ -1898,7 +1889,7 @@ void BackroomsGame::Draw(const GameTime& time) {
     lighting.fogColor=fog.ToVector3();
     lighting.fogStart=LevelInfo(world_).fogStart;
     lighting.fogEnd=LevelInfo(world_).fogEnd;
-    drawnChunks_=drawnTriangles_=0;
+    drawnChunks_=0;
     queue_.Clear();
     std::int32_t order=0;
     for (const auto& [coord,chunk]:chunks_) {
@@ -1907,7 +1898,6 @@ void BackroomsGame::Draw(const GameTime& time) {
         if (!frustum.Intersects(BoundingBox(chunk.bounds.Min+offset,
                                            chunk.bounds.Max+offset))) continue;
         ++drawnChunks_;
-        drawnTriangles_+=chunk.triangles;
         const Matrix world=Matrix::CreateTranslation(offset);
         for (int id=0;id<kMaterialCount;++id) {
             if (!chunk.vertices[id]) continue;
@@ -1923,7 +1913,9 @@ void BackroomsGame::Draw(const GameTime& time) {
         }
     }
     queue_.Sort(Vector3::Zero);
-    renderer_->Render(queue_,camera_);
+    Engine::RenderStatistics chunkStatistics;
+    renderer_->Render(queue_,camera_,&chunkStatistics);
+    drawnTriangles_=static_cast<int>(chunkStatistics.primitives);
     effect_->setTextureProperty(materials_->Get(Material::Upholstery));
     const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
         time.getTotalGameTimeProperty().getTotalSecondsProperty());

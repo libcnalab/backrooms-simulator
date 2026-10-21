@@ -19,6 +19,7 @@
 #include "Microsoft/Xna/Framework/Graphics/BlendState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexBuffer.hpp"
 
+#include "CnaEngine/Diagnostics/FrameStatistics.hpp"
 #include "CnaEngine/Graphics/Camera.hpp"
 #include "CnaEngine/Graphics/ForwardRenderer.hpp"
 #include "CnaEngine/Graphics/GpuMesh.hpp"
@@ -113,8 +114,8 @@ private:
     double runSpeed_ = kDefaultRunSpeed;
     bool insidePortal_ = false;
     int updateCount_ = 0;
-    std::array<double,120> drawIntervals_{};
-    std::size_t drawIntervalCount_ = 0, nextDrawInterval_ = 0;
+    // Start-to-start draw intervals over the last 120 frames.
+    CnaEngine::Diagnostics::FrameStatistics drawIntervals_{120};
     std::chrono::steady_clock::time_point lastDraw_{};
     double statsTime_ = 0;
     int drawnChunks_ = 0, drawnTriangles_ = 0;
