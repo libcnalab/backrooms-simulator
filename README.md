@@ -4,7 +4,7 @@ A small first-person Backrooms exploration game in C++ and CNA. Walk through det
 
 ## Build and run
 
-The supported target is **Linux desktop, CNA's EasyGL `OPENGLES3` renderer**. Put `cna` and `sharp-runtime` beside this repository, both on their `next` branches. You need CMake 3.21+, a C++23 compiler, and CNA's SDL/OpenGL ES dependencies.
+The supported target is **Linux desktop, CNA's EasyGL `OPENGLES3` renderer**. Put `cna`, `sharp-runtime` and [`cna-engine`](https://github.com/libcna/cna-engine) beside this repository, or pass `-DCNA_ROOT_DIR`, `-DCNA_SHARP_RUNTIME_ROOT` and `-DCNA_ENGINE_ROOT`. The game uses cna-engine's strict modules (XNA 4.0 types only) and links CNA statically, as the engine requires; it was last verified with CNA `900d0db3b`, Sharp Runtime `f2aecfef` and easy-gl `v0.1.1`, cna-engine's compatibility baseline. You need CMake 3.21+, a C++23 compiler, and CNA's SDL/OpenGL ES dependencies.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -26,8 +26,8 @@ The build copies assets beside the executable, so the game can be launched from 
 
 ## Copying the game
 
-Copy `cna_backrooms`, `run.sh`, the entire `assets/` directory and
-`CNA_BUILD/libcna.so` into one directory. Start it with `./run.sh`; this launcher
+Copy `cna_backrooms`, `run.sh` and the entire `assets/` directory into one
+directory; CNA is linked into the executable. Start it with `./run.sh`; this launcher
 finds libraries beside itself and uses the packaged assets from any working
 directory. Existing build executables may retain absolute dependency paths,
 so use the launcher when moving them. Future builds also search `$ORIGIN`.
