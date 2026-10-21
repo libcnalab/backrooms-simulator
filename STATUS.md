@@ -73,6 +73,26 @@ animation, saving or additional compositions. Start from README and
 harmless entities. The full finite pass history remains in
 [validation history](docs/validation-history.md).
 
+## cna-engine adoption (2026-10-21)
+
+On branch `engine-adoption` the game builds against cna-engine's strict
+modules and CNA's static libraries (CNA `900d0db3b`, Sharp Runtime
+`f2aecfef`, easy-gl `v0.1.1`). Each step is one commit:
+
+| Step | Engine facility | Check |
+| --- | --- | --- |
+| Deterministic capture (`--capture`, `--view`, `--time`) | none; the comparison tool for the steps below | 30 views twice, byte-identical, on llvmpipe and on the Radeon 780M |
+| Build | `CnaEngine::Core`, `CnaEngine::Graphics` | suites pass, captures identical |
+| Capture writing | `CaptureBackBuffer` | captures identical |
+| Chunk drawing | `GpuMesh::Borrow` (non-indexed), `RenderQueue`, `ForwardRenderer`, stock binder | captures identical; game order kept |
+| Keys and buttons | `ActionMap` | `tools/validate_controls.py` passes |
+| Title statistics | `FrameStatistics`, `RenderStatistics` | captures identical |
+| View and projection | `Camera` | captures identical, same chunks drawn |
+
+Creatures, contact spots, streaming, collision, lighting bake and audio
+remain the game's own. "Captures identical" means all 30 views
+byte-identical to the previous commit on both renderers.
+
 ## Post-delivery package correction
 
 The owner's copied build/bbb package now has run.sh to resolve its local CNA

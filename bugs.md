@@ -14,6 +14,8 @@ Observed with CNA `next` at `1ca684199f9bbf56c522a4f0d4e13446d4bae7e1`, sharp-ru
 
 **Engine follow-up:** have existing vertex/index-buffer operations acquire a device context lease, including their resource deletion paths, as framework texture operations already do. Add an EasyGL regression which writes an existing buffer between frame leases and then compares its GPU rendering. This repository does not modify CNA or sharp-runtime.
 
+**Upstream status (2026-10-21):** CNA `00b9c9898` ("graphics resources lease the GL context on any thread") makes `VertexBuffer`'s data writes lease the renderer context; it is contained in `900d0db3b`, the revision the `engine-adoption` branch builds against. The game-side lease stays until the pooled-buffer regression walk (`tools/controller_walk.py` without `--route-file`) has been repeated without it.
+
 
 ## Shared next-branch edits interrupted an incremental Debug build
 
