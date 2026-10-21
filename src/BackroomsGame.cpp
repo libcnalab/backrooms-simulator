@@ -1876,15 +1876,17 @@ void BackroomsGame::Draw(const GameTime& time) {
     effect_->setFogColorProperty(fog.ToVector3());
     effect_->setFogStartProperty(LevelInfo(world_).fogStart);
     effect_->setFogEndProperty(LevelInfo(world_).fogEnd);
+    // Eye at the origin: chunks and creatures are placed relative to the
+    // player (double-precision world positions stay out of the matrices).
     const Vector3 eye(0,1.68f,0);
     const Vector3 direction(std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
                             std::cos(yaw_)*std::cos(pitch_));
-    effect_->setViewProperty(Matrix::CreateLookAt(eye,eye+direction,Vector3::Up));
-    effect_->setProjectionProperty(Matrix::CreatePerspectiveFieldOfView(
-        verticalFovDegrees_*0.01745329252f,
-        device.getViewportProperty().getAspectRatioProperty(),0.08f,105.0f));
-    const BoundingFrustum frustum(effect_->getViewProperty()*effect_->getProjectionProperty());
-    camera_.SetMatrices(effect_->getViewProperty(),effect_->getProjectionProperty());
+    camera_.SetLookAt(eye,eye+direction,Vector3::Up);
+    camera_.SetPerspective(verticalFovDegrees_*0.01745329252f,
+        device.getViewportProperty().getAspectRatioProperty(),0.08f,105.0f);
+    effect_->setViewProperty(camera_.View());
+    effect_->setProjectionProperty(camera_.Projection());
+    const BoundingFrustum& frustum=camera_.Frustum();
     auto& lighting=renderer_->Lighting();
     lighting.fogColor=fog.ToVector3();
     lighting.fogStart=LevelInfo(world_).fogStart;
