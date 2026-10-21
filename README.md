@@ -67,7 +67,9 @@ explain the shared border rules and material bake.
 Only a 5 by 5 neighborhood of 40-metre chunks stays active. Each update builds
 at most one missing chunk; distant chunks unload. Buffer reuse (48 spares) and
 room caching (256 layouts) are bounded. Geometry is chunk-relative and native
-frustum checks reduce drawing. The window title reports positions, loaded/drawn
+frustum checks reduce drawing. cna-engine's forward renderer draws the visible
+chunks' pooled vertex lists in the game's order (chunks, then materials);
+creatures and their contact spots remain a game pass. The window title reports positions, loaded/drawn
 chunks, triangles, buffers, memory capacity, entities, loading times, actual FPS
 and UPS. A required game-side context lease is documented in [bugs.md](bugs.md).
 

@@ -46,6 +46,7 @@ namespace Backrooms {
 using namespace Microsoft::Xna::Framework;
 using namespace Microsoft::Xna::Framework::Graphics;
 using namespace Microsoft::Xna::Framework::Input;
+namespace Engine = CnaEngine::Graphics;
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -907,6 +908,7 @@ BackroomsGame::~BackroomsGame() {
         mesh.vertices.reset();
         mesh.shadowVertices.reset();
     }
+    renderer_.reset();
     materials_.reset();
     effect_.reset();
 }
@@ -950,6 +952,19 @@ void BackroomsGame::LoadContent() {
     effect_->setFogEnabledProperty(true);
     effect_->setFogStartProperty(LevelInfo(world_).fogStart);
     effect_->setFogEndProperty(LevelInfo(world_).fogEnd);
+    // The same unlit, vertex-colored, textured and fogged draw as the creatures'
+    // effect, through the engine's stock binder. CullNone, anisotropic sampling.
+    renderer_=std::make_unique<Engine::ForwardRenderer>(getGraphicsDeviceProperty());
+    renderer_->Lighting().fogEnabled=true;
+    for (int id=0;id<kMaterialCount;++id) {
+        auto& material=chunkMaterials_[id];
+        material.name="chunk material "+std::to_string(id);
+        material.shading=Engine::ShadingModel::Unlit;
+        material.vertexColors=true;
+        material.doubleSided=true;
+        material.baseTexture=materials_->Get(static_cast<Material>(id));
+        material.sampler=&SamplerState::AnisotropicWrap;
+    }
     if (capturePath_.empty()) {
         setIsMouseVisibleProperty(false);
         Mouse::setIsRelativeMouseModeEXTProperty(true);
@@ -1616,6 +1631,9 @@ void BackroomsGame::BuildChunk(ChunkCoord coord) {
         chunk.triangles+=chunk.materialTriangles[id];
         chunk.vertices[id]=AcquireBuffer(static_cast<int>(mesh.size()));
         chunk.vertices[id]->SetData(mesh.data(),static_cast<int>(mesh.size()));
+        chunk.meshes[id]=Engine::GpuMesh::Borrow(*chunk.vertices[id],chunk.materialTriangles[id],
+            chunk.bounds,{Engine::VertexAttribute::Position,Engine::VertexAttribute::Color,
+                          Engine::VertexAttribute::TexCoord0});
     }
     chunk.buildMs = std::chrono::duration<double,std::milli>(Clock::now()-start).count();
     if (chunk.buildMs>16.67) {
@@ -1863,7 +1881,14 @@ void BackroomsGame::Draw(const GameTime& time) {
         verticalFovDegrees_*0.01745329252f,
         device.getViewportProperty().getAspectRatioProperty(),0.08f,105.0f));
     const BoundingFrustum frustum(effect_->getViewProperty()*effect_->getProjectionProperty());
+    camera_.SetMatrices(effect_->getViewProperty(),effect_->getProjectionProperty());
+    auto& lighting=renderer_->Lighting();
+    lighting.fogColor=fog.ToVector3();
+    lighting.fogStart=LevelInfo(world_).fogStart;
+    lighting.fogEnd=LevelInfo(world_).fogEnd;
     drawnChunks_=drawnTriangles_=0;
+    queue_.Clear();
+    std::int32_t order=0;
     for (const auto& [coord,chunk]:chunks_) {
         const Vector3 offset(static_cast<float>(coord.x*kChunkSize-x_),0,
                              static_cast<float>(coord.z*kChunkSize-z_));
@@ -1871,19 +1896,22 @@ void BackroomsGame::Draw(const GameTime& time) {
                                            chunk.bounds.Max+offset))) continue;
         ++drawnChunks_;
         drawnTriangles_+=chunk.triangles;
-        effect_->setWorldProperty(Matrix::CreateTranslation(offset));
+        const Matrix world=Matrix::CreateTranslation(offset);
         for (int id=0;id<kMaterialCount;++id) {
             if (!chunk.vertices[id]) continue;
-            effect_->setTextureProperty(materials_->Get(static_cast<Material>(id)));
-            device.SetVertexBuffer(chunk.vertices[id].get());
-            auto& passes=effect_->getCurrentTechniqueProperty()->getPassesProperty();
-            for (int i=0; i<passes.getCountProperty(); ++i) {
-                passes[i]->Apply();
-                device.DrawPrimitives(PrimitiveType::TriangleList,0,
-                                      chunk.materialTriangles[id]);
-            }
+            Engine::RenderItem item;
+            item.mesh=&chunk.meshes[id];
+            item.material=&chunkMaterials_[id];
+            item.world=world;
+            item.bounds=Engine::WorldBounds(chunk.meshes[id],world);
+            // Chunks in map order, materials in id order, as the game drew them
+            // before the engine: where depths are equal the later surface wins.
+            item.order=order++;
+            queue_.Submit(item);
         }
     }
+    queue_.Sort(Vector3::Zero);
+    renderer_->Render(queue_,camera_);
     effect_->setTextureProperty(materials_->Get(Material::Upholstery));
     const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
         time.getTotalGameTimeProperty().getTotalSecondsProperty());

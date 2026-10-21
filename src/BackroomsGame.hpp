@@ -20,6 +20,12 @@
 #include "Microsoft/Xna/Framework/Graphics/VertexBuffer.hpp"
 #include "Microsoft/Xna/Framework/Input/Keyboard.hpp"
 
+#include "CnaEngine/Graphics/Camera.hpp"
+#include "CnaEngine/Graphics/ForwardRenderer.hpp"
+#include "CnaEngine/Graphics/GpuMesh.hpp"
+#include "CnaEngine/Graphics/Material.hpp"
+#include "CnaEngine/Graphics/RenderQueue.hpp"
+
 namespace Backrooms {
 
 class BackroomsGame final : public Microsoft::Xna::Framework::Game {
@@ -52,6 +58,8 @@ private:
         std::array<std::unique_ptr<Microsoft::Xna::Framework::Graphics::VertexBuffer>,
                    kMaterialCount> vertices;
         std::array<int, kMaterialCount> materialTriangles{};
+        // The used part of each pooled buffer, as the engine draws it.
+        std::array<CnaEngine::Graphics::GpuMesh, kMaterialCount> meshes;
         std::vector<EntitySpawn> entities;
         Microsoft::Xna::Framework::BoundingBox bounds;
         int triangles = 0;
@@ -61,6 +69,11 @@ private:
     Microsoft::Xna::Framework::GraphicsDeviceManager graphics_;
     std::unique_ptr<Microsoft::Xna::Framework::Graphics::BasicEffect> effect_;
     std::unique_ptr<Materials> materials_;
+    // Chunks are drawn by cna-engine's forward renderer; creatures stay a game pass.
+    std::unique_ptr<CnaEngine::Graphics::ForwardRenderer> renderer_;
+    std::array<CnaEngine::Graphics::Material, kMaterialCount> chunkMaterials_;
+    CnaEngine::Graphics::RenderQueue queue_;
+    CnaEngine::Graphics::Camera camera_;
     struct EntityMesh {
         std::unique_ptr<Microsoft::Xna::Framework::Graphics::VertexBuffer> vertices;
         int triangles=0;
