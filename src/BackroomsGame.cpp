@@ -31,19 +31,16 @@
 #include "Microsoft/Xna/Framework/Graphics/EffectTechnique.hpp"
 #include "Microsoft/Xna/Framework/Graphics/GraphicsDevice.hpp"
 #include "Microsoft/Xna/Framework/Graphics/GraphicsProfile.hpp"
-#include "Microsoft/Xna/Framework/Graphics/PresentationParameters.hpp"
 #include "Microsoft/Xna/Framework/Graphics/PrimitiveType.hpp"
 #include "Microsoft/Xna/Framework/Graphics/RasterizerState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/SamplerState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/SamplerStateCollection.hpp"
-#include "Microsoft/Xna/Framework/Graphics/Texture2D.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexPositionColorTexture.hpp"
 #include "Microsoft/Xna/Framework/Input/ButtonState.hpp"
 #include "Microsoft/Xna/Framework/Input/Keys.hpp"
 #include "Microsoft/Xna/Framework/Input/Mouse.hpp"
-#include "System/IO/FileAccess.hpp"
-#include "System/IO/FileMode.hpp"
-#include "System/IO/FileStream.hpp"
+
+#include "CnaEngine/Graphics/ScreenCapture.hpp"
 
 namespace Backrooms {
 using namespace Microsoft::Xna::Framework;
@@ -1969,18 +1966,10 @@ void BackroomsGame::Draw(const GameTime& time) {
 
 void BackroomsGame::SaveCapture() {
     // Read before Present, while the back buffer holds this frame.
-    auto& device=getGraphicsDeviceProperty();
-    const auto& parameters=device.getPresentationParametersProperty();
-    const int width=parameters.getBackBufferWidthProperty();
-    const int height=parameters.getBackBufferHeightProperty();
-    std::vector<Color> pixels(static_cast<std::size_t>(width)*static_cast<std::size_t>(height));
-    device.GetBackBufferData(pixels.data(),static_cast<int>(pixels.size()));
-    Texture2D image(device,width,height);
-    image.SetData(pixels.data(),static_cast<int>(pixels.size()));
-    System::IO::FileStream stream(capturePath_,System::IO::FileMode::Create,
-                                  System::IO::FileAccess::Write);
-    image.SaveAsPng(&stream,width,height);
-    std::cout << "Captured " << capturePath_ << ' ' << width << 'x' << height
+    const auto result=CnaEngine::Graphics::CaptureBackBuffer(getGraphicsDeviceProperty(),
+                                                             {.path=capturePath_});
+    if (!result.success) throw std::runtime_error(result.error);
+    std::cout << "Captured " << result.path << ' ' << result.width << 'x' << result.height
               << ", " << drawnChunks_ << " chunks drawn\n";
 }
 
