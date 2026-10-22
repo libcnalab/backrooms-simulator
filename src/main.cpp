@@ -18,6 +18,7 @@ int main(int argc, char** argv) {
         std::string capture;
         float captureTime=0;
         bool view=false;
+        bool shadows=true;
         float yaw=0,pitch=0;
         for (int i=1;i<argc;++i) {
             const std::string argument=argv[i];
@@ -55,12 +56,14 @@ int main(int argc, char** argv) {
                 capture=argv[++i];
             else if (argument=="--time" && i+1<argc)
                 captureTime=std::stof(argv[++i]);
+            else if (argument=="--no-shadows") shadows=false;
             else {
                 std::cerr << "Usage: cna_backrooms [--seed unsigned-integer] "
                              "[--level 0|1|2] [--position x z] [--view yaw pitch] "
                              "[--walk-speed m/s] [--run-speed m/s] [--fov degrees] "
                              "[--msaa 0|4] [--stream-test] [--stream-test-metres distance] "
-                             "[--stream-test-loops 1..8] [--capture file.png [--time seconds]]\n";
+                             "[--stream-test-loops 1..8] [--capture file.png [--time seconds]] "
+                             "[--no-shadows]\n";
                 return 2;
             }
         }
@@ -68,6 +71,7 @@ int main(int argc, char** argv) {
                                       walkSpeed,runSpeed,streamTestMetres,verticalFov,
                                       multiSampleCount,streamTestLoops);
         if (view) game.SetView(yaw,pitch);
+        if (!shadows) game.SetShadows(false);
         if (!capture.empty()) game.RequestCapture(capture,captureTime);
         game.Run();
     } catch (const std::exception& e) {

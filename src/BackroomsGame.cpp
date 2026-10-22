@@ -7,6 +7,8 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <initializer_list>
@@ -39,7 +41,9 @@
 #include "Microsoft/Xna/Framework/Input/Keys.hpp"
 #include "Microsoft/Xna/Framework/Input/Mouse.hpp"
 
+#include "CnaEngine/Enhanced/ShadowReception.hpp"
 #include "CnaEngine/Graphics/ScreenCapture.hpp"
+#include "CnaEngine/Graphics/VertexLayouts.hpp"
 
 namespace Backrooms {
 using namespace Microsoft::Xna::Framework;
@@ -52,6 +56,33 @@ using Clock = std::chrono::steady_clock;
 using Mesh = std::vector<VertexPositionColorTexture>;
 using Meshes = std::array<Mesh,kMaterialCount>;
 constexpr float kCarpetRepeat=0.5f; // two-metre loop-pile bitmap footprint
+// The ceiling's panels as one key light from above, a little off vertical so
+// a creature's shadow keeps its shape. Of the baked light, this share is the
+// key light's: a shadow takes it away.
+const Vector3 kCeilingLight=Vector3::Normalize(Vector3(0.28f,-1.0f,0.18f));
+constexpr float kShadowShare=0.45f;
+// Creatures this close cast shadows; farther ones are lost in the fog.
+constexpr double kShadowRange=20.0;
+
+// Chunk vertices in cna-engine's PositionNormalColorTexture layout, with every
+// normal facing the ceiling light: outside shadows the lit draw keeps the
+// baked colour exactly.
+std::vector<std::uint8_t> PackForShadows(const std::vector<VertexPositionColorTexture>& mesh) {
+    const auto& layout=CnaEngine::Graphics::VertexLayout::PositionNormalColorTexture();
+    std::vector<std::uint8_t> bytes(mesh.size()*static_cast<std::size_t>(layout.Stride()));
+    const Vector3 normal=-kCeilingLight;
+    std::uint8_t* out=bytes.data();
+    const auto put=[&out](float value) { std::memcpy(out,&value,sizeof value); out+=sizeof value; };
+    for (const auto& vertex:mesh) {
+        put(vertex.Position.X); put(vertex.Position.Y); put(vertex.Position.Z);
+        put(normal.X); put(normal.Y); put(normal.Z);
+        const std::uint32_t color=vertex.Color.getPackedValueProperty();
+        std::memcpy(out,&color,sizeof color);
+        out+=sizeof color;
+        put(vertex.TextureCoordinate.X); put(vertex.TextureCoordinate.Y);
+    }
+    return bytes;
+}
 
 Color FromRgb(const LevelDefinition::Rgb& value) {
     return Color(value[0],value[1],value[2]);
@@ -923,6 +954,7 @@ BackroomsGame::~BackroomsGame() {
         mesh.vertices.reset();
         mesh.shadowVertices.reset();
     }
+    shadowMap_.reset();
     renderer_.reset();
     materials_.reset();
     effect_.reset();
@@ -975,6 +1007,16 @@ void BackroomsGame::LoadContent() {
     // effect, through the engine's stock binder. CullNone, anisotropic sampling.
     renderer_=std::make_unique<Engine::ForwardRenderer>(getGraphicsDeviceProperty());
     renderer_->Lighting().fogEnabled=true;
+    // The ceiling light, for the chunks' shadowed share (bakedKeyLight).
+    renderer_->Lighting().defaultLighting=false;
+    renderer_->Lighting().lightDirection=kCeilingLight;
+    // Creatures cast shadows on devices that can sample a shadow map;
+    // elsewhere they keep their contact spots.
+    if (getGraphicsDeviceProperty().SupportsShadowSamplingEXT()) {
+        shadowMap_=std::make_unique<Engine::ShadowMap>(getGraphicsDeviceProperty(),1024);
+        CnaEngine::Enhanced::CalibrateShadowMap(getGraphicsDeviceProperty(),*shadowMap_);
+    }
+    casterMaterial_.name="creature";
     for (int id=0;id<kMaterialCount;++id) {
         auto& material=chunkMaterials_[id];
         material.name="chunk material "+std::to_string(id);
@@ -1171,6 +1213,14 @@ void BackroomsGame::BuildEntityMesh() {
             VertexPositionColorTexture::getVertexDeclarationStatic(),
             static_cast<int>(mesh.size()),BufferUsage::WriteOnly);
         model.vertices->SetData(mesh.data(),static_cast<int>(mesh.size()));
+        BoundingBox bounds(mesh.front().Position,mesh.front().Position);
+        for (const auto& vertex:mesh) {
+            bounds.Min=Vector3::Min(bounds.Min,vertex.Position);
+            bounds.Max=Vector3::Max(bounds.Max,vertex.Position);
+        }
+        model.gpu=Engine::GpuMesh::Borrow(*model.vertices,model.triangles,bounds,
+            {Engine::VertexAttribute::Position,Engine::VertexAttribute::Color,
+             Engine::VertexAttribute::TexCoord0});
         Mesh shadow;
         constexpr float turn=6.28318530718f;
         std::vector<Vector2> feet;
@@ -1218,7 +1268,7 @@ std::unique_ptr<VertexBuffer> BackroomsGame::AcquireBuffer(int vertexCount) {
     ++bufferCreations_;
     const int capacity=((vertexCount+511)/512)*512;
     return std::make_unique<VertexBuffer>(getGraphicsDeviceProperty(),
-        VertexPositionColorTexture::getVertexDeclarationStatic(),
+        Engine::VertexLayout::PositionNormalColorTexture().Declaration(),
         capacity,BufferUsage::WriteOnly);
 }
 
@@ -1649,10 +1699,11 @@ void BackroomsGame::BuildChunk(ChunkCoord coord) {
         chunk.materialTriangles[id]=static_cast<int>(mesh.size()/3);
         chunk.triangles+=chunk.materialTriangles[id];
         chunk.vertices[id]=AcquireBuffer(static_cast<int>(mesh.size()));
-        chunk.vertices[id]->SetData(mesh.data(),static_cast<int>(mesh.size()));
+        const auto packed=PackForShadows(mesh);
+        chunk.vertices[id]->SetData(packed.data(),static_cast<int>(packed.size()));
         chunk.meshes[id]=Engine::GpuMesh::Borrow(*chunk.vertices[id],chunk.materialTriangles[id],
-            chunk.bounds,{Engine::VertexAttribute::Position,Engine::VertexAttribute::Color,
-                          Engine::VertexAttribute::TexCoord0});
+            chunk.bounds,{Engine::VertexAttribute::Position,Engine::VertexAttribute::Normal,
+                          Engine::VertexAttribute::Color,Engine::VertexAttribute::TexCoord0});
     }
     chunk.buildMs = std::chrono::duration<double,std::milli>(Clock::now()-start).count();
     if (chunk.buildMs>16.67) {
@@ -1717,22 +1768,25 @@ void BackroomsGame::UpdateTitle(double elapsed) {
     const double p95=drawIntervals_.PercentileSeconds(0.95)*1000.0;
     const double maximum=drawIntervals_.MaxSeconds()*1000.0;
     int triangles=0,entities=0;
-    std::size_t vertexCapacity=0;
+    // Chunk buffers carry normals (36-byte vertices), creature buffers not (24).
+    std::size_t bufferBytes=0;
+    const auto add=[&bufferBytes](const VertexBuffer& buffer) {
+        bufferBytes+=static_cast<std::size_t>(buffer.getVertexCountProperty())*
+            static_cast<std::size_t>(buffer.getVertexDeclarationProperty().getVertexStrideProperty());
+    };
     for (const auto& [coord,chunk]:chunks_) {
         (void)coord;
         triangles+=chunk.triangles;
         entities+=static_cast<int>(chunk.entities.size());
         for (const auto& buffer:chunk.vertices)
-            if (buffer) vertexCapacity+=buffer->getVertexCountProperty();
+            if (buffer) add(*buffer);
     }
-    for (const auto& buffer:spareVertices_)
-        vertexCapacity+=buffer->getVertexCountProperty();
+    for (const auto& buffer:spareVertices_) add(*buffer);
     for (const auto& mesh:entityMeshes_) {
-        if (mesh.vertices) vertexCapacity+=mesh.vertices->getVertexCountProperty();
-        if (mesh.shadowVertices) vertexCapacity+=mesh.shadowVertices->getVertexCountProperty();
+        if (mesh.vertices) add(*mesh.vertices);
+        if (mesh.shadowVertices) add(*mesh.shadowVertices);
     }
-    const double bufferMiB=vertexCapacity*
-        VertexPositionColorTexture::getVertexDeclarationStatic().getVertexStrideProperty()/1048576.0;
+    const double bufferMiB=bufferBytes/1048576.0;
     const auto here=ChunkAt(x_,z_);
     std::ostringstream title;
     title << "cna-backrooms | Level " << world_.level << " (" << LevelInfo(world_).name
@@ -1870,12 +1924,75 @@ void BackroomsGame::RecordDrawInterval() {
     lastDraw_=now;
 }
 
+void BackroomsGame::PlaceCreatures(float seconds) {
+    creatures_.clear();
+    nearestEntityDistance_=0;
+    nearestEntityOpacity_=0;
+    bool haveNearestEntity=false;
+    for (const auto& [coord,chunk]:chunks_) {
+        (void)coord;
+        for (const auto& entity:chunk.entities) {
+            const auto position=EntityPositionAt(entity,seconds);
+            const double ex=position.x,ez=position.z;
+            const double distance=std::hypot(ex-x_,ez-z_);
+            // Retreat gradually as the player approaches. No mesh can surround
+            // the camera, and there is no interaction or physical obstacle.
+            const float proximity=static_cast<float>(std::clamp((distance-1.5)/3.5,0.0,1.0));
+            const float opacity=proximity*proximity*(3-2*proximity);
+            if (!haveNearestEntity || distance<nearestEntityDistance_) {
+                haveNearestEntity=true;
+                nearestEntityDistance_=distance;
+                nearestEntityOpacity_=opacity;
+            }
+            if (opacity<=0 || distance>82.0) continue;
+            const float facing=static_cast<float>(std::atan2(x_-ex,z_-ez));
+            PlacedCreature placed;
+            placed.model=&entityMeshes_[static_cast<int>(entity.kind)];
+            placed.world=Matrix::CreateRotationY(facing)*
+                Matrix::CreateTranslation(static_cast<float>(ex-x_),0,static_cast<float>(ez-z_));
+            placed.opacity=opacity;
+            placed.distance=distance;
+            creatures_.push_back(placed);
+        }
+    }
+}
+
+bool BackroomsGame::RenderShadowMap() {
+    // A creature fading out (closer than about 3 m) stops casting; its
+    // contact spots take over.
+    casters_.clear();
+    for (auto& creature:creatures_) {
+        creature.casts=creature.opacity>=0.5f && creature.distance<kShadowRange;
+        if (!creature.casts) continue;
+        Engine::RenderItem item;
+        item.mesh=&creature.model->gpu;
+        item.material=&casterMaterial_;
+        item.world=creature.world;
+        item.bounds=Engine::WorldBounds(creature.model->gpu,creature.world);
+        casters_.push_back(item);
+    }
+    if (casters_.empty()) return false;
+    shadowMap_->Fit(-kCeilingLight,Vector3(0,1,0),static_cast<float>(kShadowRange)+2);
+    shadowMap_->Render(getGraphicsDeviceProperty(),casters_);
+    return true;
+}
+
 void BackroomsGame::Draw(const GameTime& time) {
     // Start-to-start intervals include streaming, frame submission and present.
     // A fixed update rate alone can hide render stalls and skipped draws.
     RecordDrawInterval();
     const auto drawStart=Clock::now();
     auto& device=getGraphicsDeviceProperty();
+    const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
+        time.getTotalGameTimeProperty().getTotalSecondsProperty());
+    PlaceCreatures(seconds);
+    // The shadow map before the clear: drawing into it leaves the back
+    // buffer undefined. Without casters the chunks draw unlit, as baked.
+    for (auto& creature:creatures_) creature.casts=false;
+    const bool shadowed=shadowMap_ && shadows_ && RenderShadowMap();
+    CnaEngine::Enhanced::ApplyShadowReception(*renderer_,shadowed ? shadowMap_.get() : nullptr,
+                                              {.filterRadius=2});
+    for (auto& material:chunkMaterials_) material.bakedKeyLight=shadowed ? kShadowShare : 0.0f;
     const Color fog=FromRgb(LevelInfo(world_).fog);
     device.Clear(fog);
     device.setDepthStencilStateProperty(DepthStencilState::Default);
@@ -1928,75 +2045,53 @@ void BackroomsGame::Draw(const GameTime& time) {
     renderer_->Render(queue_,camera_,&chunkStatistics);
     drawnTriangles_=static_cast<int>(chunkStatistics.primitives);
     effect_->setTextureProperty(materials_->Get(Material::Upholstery));
-    const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
-        time.getTotalGameTimeProperty().getTotalSecondsProperty());
-    nearestEntityDistance_=0;
-    nearestEntityOpacity_=0;
-    bool haveNearestEntity=false;
-    for (const auto& [coord,chunk]:chunks_) {
-        (void)coord;
-        for (const auto& entity:chunk.entities) {
-            const auto position=EntityPositionAt(entity,seconds);
-            const double ex=position.x,ez=position.z;
-            const auto& model=entityMeshes_[static_cast<int>(entity.kind)];
-            const double distance=std::hypot(ex-x_,ez-z_);
-            // Retreat gradually as the player approaches. No mesh can surround
-            // the camera, and there is no interaction or physical obstacle.
-            const float proximity=static_cast<float>(std::clamp((distance-1.5)/3.5,0.0,1.0));
-            const float opacity=proximity*proximity*(3-2*proximity);
-            if (!haveNearestEntity || distance<nearestEntityDistance_) {
-                haveNearestEntity=true;
-                nearestEntityDistance_=distance;
-                nearestEntityOpacity_=opacity;
-            }
-            if (opacity<=0 || distance>82.0) continue;
-            const float facing=static_cast<float>(std::atan2(x_-ex,z_-ez));
-            effect_->setWorldProperty(Matrix::CreateRotationY(facing)*
-                Matrix::CreateTranslation(static_cast<float>(ex-x_),0,
-                                          static_cast<float>(ez-z_)));
-            if (distance<20) {
-                // Soft contact spots follow the same pose as the feet.
-                // Native blending reads depth without writing into the floor.
-                effect_->setTextureEnabledProperty(false);
-                effect_->setFogEnabledProperty(false);
-                effect_->setAlphaProperty(opacity*static_cast<float>(1-distance/20));
-                device.setBlendStateProperty(BlendState::AlphaBlend);
-                device.setDepthStencilStateProperty(DepthStencilState::DepthRead);
-                device.SetVertexBuffer(model.shadowVertices.get());
-                auto& passes=effect_->getCurrentTechniqueProperty()->getPassesProperty();
-                for (int i=0;i<passes.getCountProperty();++i) {
-                    passes[i]->Apply();
-                    device.DrawPrimitives(PrimitiveType::TriangleList,0,model.shadowTriangles);
-                }
-                effect_->setTextureEnabledProperty(true);
-                effect_->setFogEnabledProperty(true);
-                effect_->setAlphaProperty(1);
-                device.setBlendStateProperty(BlendState::Opaque);
-                device.setDepthStencilStateProperty(DepthStencilState::Default);
-            }
-            device.SetVertexBuffer(model.vertices.get());
+    for (const auto& creature:creatures_) {
+        const auto& model=*creature.model;
+        const float opacity=creature.opacity;
+        const double distance=creature.distance;
+        effect_->setWorldProperty(creature.world);
+        if (distance<20 && !creature.casts) {
+            // Soft contact spots follow the same pose as the feet.
+            // Native blending reads depth without writing into the floor.
+            effect_->setTextureEnabledProperty(false);
+            effect_->setFogEnabledProperty(false);
+            effect_->setAlphaProperty(opacity*static_cast<float>(1-distance/20));
+            device.setBlendStateProperty(BlendState::AlphaBlend);
+            device.setDepthStencilStateProperty(DepthStencilState::DepthRead);
+            device.SetVertexBuffer(model.shadowVertices.get());
             auto& passes=effect_->getCurrentTechniqueProperty()->getPassesProperty();
-            if (opacity<1) {
-                // Resolve the nearest cloth surface before blending. This
-                // avoids seeing overlapping back faces through the body and
-                // needs only CNA's native color-write mask and depth states.
-                device.setBlendStateProperty(entityDepthOnlyBlend_);
-                for (int i=0;i<passes.getCountProperty();++i) {
-                    passes[i]->Apply();
-                    device.DrawPrimitives(PrimitiveType::TriangleList,0,model.triangles);
-                }
-                device.setBlendStateProperty(BlendState::AlphaBlend);
-                device.setDepthStencilStateProperty(DepthStencilState::DepthRead);
-                effect_->setAlphaProperty(opacity);
-            }
             for (int i=0;i<passes.getCountProperty();++i) {
                 passes[i]->Apply();
-                device.DrawPrimitives(PrimitiveType::TriangleList,0,model.triangles);
+                device.DrawPrimitives(PrimitiveType::TriangleList,0,model.shadowTriangles);
             }
+            effect_->setTextureEnabledProperty(true);
+            effect_->setFogEnabledProperty(true);
             effect_->setAlphaProperty(1);
             device.setBlendStateProperty(BlendState::Opaque);
             device.setDepthStencilStateProperty(DepthStencilState::Default);
         }
+        device.SetVertexBuffer(model.vertices.get());
+        auto& passes=effect_->getCurrentTechniqueProperty()->getPassesProperty();
+        if (opacity<1) {
+            // Resolve the nearest cloth surface before blending. This
+            // avoids seeing overlapping back faces through the body and
+            // needs only CNA's native color-write mask and depth states.
+            device.setBlendStateProperty(entityDepthOnlyBlend_);
+            for (int i=0;i<passes.getCountProperty();++i) {
+                passes[i]->Apply();
+                device.DrawPrimitives(PrimitiveType::TriangleList,0,model.triangles);
+            }
+            device.setBlendStateProperty(BlendState::AlphaBlend);
+            device.setDepthStencilStateProperty(DepthStencilState::DepthRead);
+            effect_->setAlphaProperty(opacity);
+        }
+        for (int i=0;i<passes.getCountProperty();++i) {
+            passes[i]->Apply();
+            device.DrawPrimitives(PrimitiveType::TriangleList,0,model.triangles);
+        }
+        effect_->setAlphaProperty(1);
+        device.setBlendStateProperty(BlendState::Opaque);
+        device.setDepthStencilStateProperty(DepthStencilState::Default);
     }
     Game::Draw(time);
     drawWorkMs_=std::chrono::duration<double,std::milli>(Clock::now()-drawStart).count();

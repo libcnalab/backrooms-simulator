@@ -22,7 +22,7 @@ cmake -S . -B build -DCNA_USE_SYSTEM_SDL=ON \
   -DCMAKE_PREFIX_PATH=../cna/.sdl-prebuilt-Linux-x86_64-wayland/install
 ```
 
-The build copies assets beside the executable, so the game can be launched from any working directory. Missing or unavailable audio is logged and the game continues. `--seed` accepts an unsigned decimal or `0x` hexadecimal integer; the default is reproducible. `--level 0|1|2 --position x z` starts at a chosen valid point for inspecting procedural rooms. `--walk-speed` and `--run-speed` set movement speeds in metres per second (defaults: 2.4 and 4.8). `--fov` sets vertical field of view in degrees, from 45 to 90 (default: 60, about 91 degrees horizontally at 16:9). `--msaa 0|4` controls native multisampling (default: four samples, capped by the driver; use zero on slower hardware). `--stream-test` runs a 9.6 km automated GPU streaming sweep and exits; `--stream-test-metres 19200` uses another distance and implies the test mode. `--view yaw pitch` sets the starting view in degrees (yaw 90 looks along +X). `--capture file.png` waits until the 5 by 5 neighborhood is loaded, saves that frame and exits; creatures stand where they are at `--time` seconds (default 0) and no input or wall-clock time reaches the frame, so the same arguments give the same image. Captures use XNA's HiDef profile, which can read the back buffer.
+The build copies assets beside the executable, so the game can be launched from any working directory. Missing or unavailable audio is logged and the game continues. `--seed` accepts an unsigned decimal or `0x` hexadecimal integer; the default is reproducible. `--level 0|1|2 --position x z` starts at a chosen valid point for inspecting procedural rooms. `--walk-speed` and `--run-speed` set movement speeds in metres per second (defaults: 2.4 and 4.8). `--fov` sets vertical field of view in degrees, from 45 to 90 (default: 60, about 91 degrees horizontally at 16:9). `--msaa 0|4` controls native multisampling (default: four samples, capped by the driver; use zero on slower hardware). `--stream-test` runs a 9.6 km automated GPU streaming sweep and exits; `--stream-test-metres 19200` uses another distance and implies the test mode. `--view yaw pitch` sets the starting view in degrees (yaw 90 looks along +X). `--capture file.png` waits until the 5 by 5 neighborhood is loaded, saves that frame and exits; creatures stand where they are at `--time` seconds (default 0) and no input or wall-clock time reaches the frame, so the same arguments give the same image. `--no-shadows` switches the creatures' shadows off. Captures use XNA's HiDef profile, which can read the back buffer.
 
 ### Browser build
 
@@ -82,7 +82,12 @@ at most one missing chunk; distant chunks unload. Buffer reuse (48 spares) and
 room caching (256 layouts) are bounded. Geometry is chunk-relative and native
 frustum checks reduce drawing. cna-engine's forward renderer draws the visible
 chunks' pooled vertex lists in the game's order (chunks, then materials);
-creatures and their contact spots remain a game pass. The window title reports positions, loaded/drawn
+creatures remain a game pass. Creatures within 20 metres cast real shadows
+from the ceiling light (cna-engine's shadow map, received by the baked light:
+`Material::bakedKeyLight`, so outside shadows the floor looks exactly as
+baked); a creature fading out near the player, and every creature on a device
+that cannot sample a shadow map or with `--no-shadows`, keeps its contact
+spots. The window title reports positions, loaded/drawn
 chunks, triangles, buffers, memory capacity, entities, loading times, actual FPS
 and UPS. A required game-side context lease is documented in [bugs.md](bugs.md).
 

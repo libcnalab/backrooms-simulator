@@ -25,6 +25,7 @@
 #include "CnaEngine/Graphics/GpuMesh.hpp"
 #include "CnaEngine/Graphics/Material.hpp"
 #include "CnaEngine/Graphics/RenderQueue.hpp"
+#include "CnaEngine/Graphics/ShadowMap.hpp"
 #include "CnaEngine/Input/ActionMap.hpp"
 
 namespace Backrooms {
@@ -48,6 +49,10 @@ public:
     // input, mouse capture or wall-clock time reaches the frame.
     void RequestCapture(std::string path, float seconds);
     void SetView(float yawDegrees, float pitchDegrees);
+    // Creatures' shadows from the ceiling light (on unless switched off here
+    // or in the settings; devices that cannot sample a shadow map keep the
+    // contact spots).
+    void SetShadows(bool enabled) { shadows_=enabled; }
     const std::string& GetTypeName() const override;
     void Initialize() override;
     void LoadContent() override;
@@ -80,8 +85,24 @@ private:
         int triangles=0;
         std::unique_ptr<Microsoft::Xna::Framework::Graphics::VertexBuffer> shadowVertices;
         int shadowTriangles=0;
+        // The body as the engine's mesh, for the shadow map.
+        CnaEngine::Graphics::GpuMesh gpu;
     };
     std::array<EntityMesh,kEntityKindCount> entityMeshes_;
+    // This frame's creatures in view range, posed; placed before the shadow
+    // map is drawn, which has to happen before the frame is cleared.
+    struct PlacedCreature {
+        const EntityMesh* model=nullptr;
+        Microsoft::Xna::Framework::Matrix world;
+        float opacity=1;
+        double distance=0;
+        bool casts=false;
+    };
+    std::vector<PlacedCreature> creatures_;
+    std::unique_ptr<CnaEngine::Graphics::ShadowMap> shadowMap_;
+    std::vector<CnaEngine::Graphics::RenderItem> casters_;
+    CnaEngine::Graphics::Material casterMaterial_;
+    bool shadows_ = true;
     Microsoft::Xna::Framework::Graphics::BlendState entityDepthOnlyBlend_;
     double nearestEntityDistance_ = 0;
     float nearestEntityOpacity_ = 0;
@@ -137,6 +158,8 @@ private:
 
     void BuildChunk(ChunkCoord coord);
     void BuildEntityMesh();
+    void PlaceCreatures(float seconds);
+    bool RenderShadowMap();
     void UpdateEntityAudio(float seconds,double elapsed);
     std::unique_ptr<Microsoft::Xna::Framework::Graphics::VertexBuffer>
         AcquireBuffer(int vertexCount);

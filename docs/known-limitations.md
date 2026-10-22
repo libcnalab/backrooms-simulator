@@ -4,8 +4,9 @@ These describe the implemented game and finite validation, rather than an
 additional feature plan.
 
 - **Lighting:** fluorescent influence and wall/floor depth are baked into vertices.
-  Large-room floor pools remain approximate. Creatures have contact spots;
-  they do not cast real moving shadows.
+  Large-room floor pools remain approximate. Creatures within 20 metres cast
+  shadows from one ceiling light slightly off vertical, not from the nearest
+  panels; furniture and walls cast none (their contact shading is baked).
 - **Composition:** rooms, offset partitions and support plans are deterministic
   and varied, but remain mostly axis aligned. Material repetition and empty
   spaces are intentional. This is a small set of architectural families.
