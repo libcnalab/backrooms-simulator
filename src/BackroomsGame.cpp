@@ -955,7 +955,11 @@ void BackroomsGame::Initialize() {
 }
 
 void BackroomsGame::LoadContent() {
+#ifdef __EMSCRIPTEN__
+    std::cerr << "Renderer ready: WEBGL2, MSAA "
+#else
     std::cerr << "Renderer ready: OPENGLES3, MSAA "
+#endif
               << getGraphicsDeviceProperty().getPresentationParametersProperty()
                     .getMultiSampleCountProperty() << " samples applied\n";
     const auto directory=FindAssetDirectory();
@@ -1798,7 +1802,12 @@ void BackroomsGame::Update(GameTime& time) {
             captured_=false;
             Mouse::setIsRelativeMouseModeEXTProperty(false);
             setIsMouseVisibleProperty(true);
-        } else Exit();
+        }
+#ifndef __EMSCRIPTEN__
+        // A page in a browser has nothing to quit to: there Escape only
+        // releases the mouse.
+        else Exit();
+#endif
     }
     const auto& mouse=input.mouse;
     const bool recaptured=!captured_ && controls_.Held(recapture_);

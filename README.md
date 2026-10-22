@@ -24,6 +24,19 @@ cmake -S . -B build -DCNA_USE_SYSTEM_SDL=ON \
 
 The build copies assets beside the executable, so the game can be launched from any working directory. Missing or unavailable audio is logged and the game continues. `--seed` accepts an unsigned decimal or `0x` hexadecimal integer; the default is reproducible. `--level 0|1|2 --position x z` starts at a chosen valid point for inspecting procedural rooms. `--walk-speed` and `--run-speed` set movement speeds in metres per second (defaults: 2.4 and 4.8). `--fov` sets vertical field of view in degrees, from 45 to 90 (default: 60, about 91 degrees horizontally at 16:9). `--msaa 0|4` controls native multisampling (default: four samples, capped by the driver; use zero on slower hardware). `--stream-test` runs a 9.6 km automated GPU streaming sweep and exits; `--stream-test-metres 19200` uses another distance and implies the test mode. `--view yaw pitch` sets the starting view in degrees (yaw 90 looks along +X). `--capture file.png` waits until the 5 by 5 neighborhood is loaded, saves that frame and exits; creatures stand where they are at `--time` seconds (default 0) and no input or wall-clock time reaches the frame, so the same arguments give the same image. Captures use XNA's HiDef profile, which can read the back buffer.
 
+### Browser build
+
+The same game runs in a browser through Emscripten: CNA's `WEBGL2` renderer (EasyGL over WebGL 2), SDL3 for input and audio, and `assets/` preloaded at `/assets`. The only browser-specific behaviour is that Escape releases the mouse but does not quit, since a page has nothing to quit to.
+
+```sh
+tools/build_web.sh            # configure (first time), build, package into build-consumer/web-package/
+tools/build_web.sh --serve    # ... and serve it on http://localhost:8080/
+```
+
+It needs the Emscripten SDK (`$EMSDK`, default `~/emsdk`); pass the dependency paths in `CMAKE_ARGS` when they are not beside this repository. Any static web server works if it sends `.wasm` as `application/wasm`; the build uses no threads, so it needs no special headers. Click the picture to capture the mouse. Desktop options go in the address: `?arg=--seed&arg=31337`.
+
+Checked on 2026-10-22 in headless Chrome with software WebGL 2 (SwiftShader): the 25 chunks around the spawn load, the materials and sounds come from the preload, walking works, and options in the address reach the game, with no error in the console. Not checked yet: a real GPU, other browsers, audio output.
+
 ## Copying the game
 
 Copy `cna_backrooms`, `run.sh` and the entire `assets/` directory into one
