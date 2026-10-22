@@ -10,9 +10,11 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <initializer_list>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -926,12 +928,14 @@ BackroomsGame::BackroomsGame(std::uint64_t seed, bool streamTest,
     runToggle_=controls_.AddAction("ToggleRun");
     controls_.Bind(runToggle_,Binding::ForKey(Keys::LeftShift));
     controls_.Bind(runToggle_,Binding::ForKey(Keys::RightShift));
-    releaseMouse_=controls_.AddAction("ReleaseMouse");
-    controls_.Bind(releaseMouse_,Binding::ForKey(Keys::Escape));
+    pause_=controls_.AddAction("Pause");
+    controls_.Bind(pause_,Binding::ForKey(Keys::Escape));
     respawn_=controls_.AddAction("Respawn");
     controls_.Bind(respawn_,Binding::ForKey(Keys::R));
     recapture_=controls_.AddAction("CaptureMouse");
     controls_.Bind(recapture_,Binding::ForMouse(CnaEngine::Input::MouseButton::Left));
+    // Arrows, Enter or Space, Escape or Backspace, and the pad, in menus.
+    menuActions_=CnaEngine::UI::MenuActions::Declare(controls_);
     graphics_.setPreferredBackBufferWidthProperty(1280);
     graphics_.setPreferredBackBufferHeightProperty(720);
     graphics_.setSynchronizeWithVerticalRetraceProperty(true);
@@ -955,6 +959,8 @@ BackroomsGame::~BackroomsGame() {
         mesh.shadowVertices.reset();
     }
     shadowMap_.reset();
+    font_.reset();
+    painter_.reset();
     renderer_.reset();
     materials_.reset();
     effect_.reset();
@@ -1026,11 +1032,7 @@ void BackroomsGame::LoadContent() {
         material.baseTexture=materials_->Get(static_cast<Material>(id));
         material.sampler=&SamplerState::AnisotropicWrap;
     }
-    if (capturePath_.empty()) {
-        setIsMouseVisibleProperty(false);
-        Mouse::setIsRelativeMouseModeEXTProperty(true);
-        captured_ = true;
-    }
+    if (capturePath_.empty()) SetMouseCaptured(true);
     BuildEntityMesh();
     BuildChunk(ChunkAt(x_,z_));
     try {
@@ -1063,6 +1065,116 @@ void BackroomsGame::LoadContent() {
                       << " unavailable: " << error.what() << '\n';
         }
     }
+    painter_=std::make_unique<CnaEngine::UI::Painter>(getGraphicsDeviceProperty());
+    font_=std::make_unique<CnaEngine::UI::BuiltInFont>(getGraphicsDeviceProperty());
+    LoadPreferences();
+    BuildMenus();
+    if (capturePath_.empty() && !streamTest_) toasts_.Show("Esc: menu",4);
+}
+
+void BackroomsGame::SetMouseCaptured(bool captured) {
+    if (captured==captured_) return;
+    captured_=captured;
+    Mouse::setIsRelativeMouseModeEXTProperty(captured);
+    setIsMouseVisibleProperty(!captured);
+    // Consuming the click frame's absolute coordinates as a delta made the
+    // camera jump on recapture.
+    skipMouseDelta_=captured;
+}
+
+void BackroomsGame::Respawn() {
+    x_=2.5; z_=2.5;
+    yaw_=world_.level==2 ? 0.0f : 1.5707963f;
+    pitch_=0;
+    stepDistance_=0;
+}
+
+void BackroomsGame::LoadPreferences() {
+    if (!capturePath_.empty() || streamTest_) return;
+    preferencesPath_=CnaEngine::UserConfigPath("cna-backrooms","settings.ini");
+    if (preferencesPath_.empty()) return;
+    preferences_=CnaEngine::SettingsFile::Load(preferencesPath_);
+    for (const auto& problem:preferences_.Problems())
+        std::cerr << preferencesPath_.string() << ':' << problem.line << ": " << problem.message << '\n';
+    Audio::SoundEffect::setMasterVolumeProperty(preferences_.GetFloat("sound.volume",1,0,1));
+    lookSensitivity_=preferences_.GetFloat("view.look_sensitivity",1,0.25f,3);
+    if (!shadowsFromCommandLine_) shadows_=preferences_.GetBool("graphics.shadows",true);
+    const auto bindings=preferencesPath_.parent_path()/"bindings.ini";
+    if (std::ifstream stream(bindings,std::ios::binary); stream) {
+        const std::string text((std::istreambuf_iterator<char>(stream)),std::istreambuf_iterator<char>());
+        for (const auto& warning:controls_.LoadBindings(text).warnings)
+            std::cerr << bindings.string() << ": " << warning << '\n';
+    }
+}
+
+void BackroomsGame::SavePreferences() {
+    if (preferencesPath_.empty()) return;
+    try {
+        preferences_.SetFloat("sound.volume",Audio::SoundEffect::getMasterVolumeProperty(),2);
+        preferences_.SetFloat("view.look_sensitivity",lookSensitivity_,2);
+        preferences_.SetBool("graphics.shadows",shadows_);
+        preferences_.Save(preferencesPath_);
+        const auto bindings=preferencesPath_.parent_path()/"bindings.ini";
+        std::ofstream stream(bindings,std::ios::binary|std::ios::trunc);
+        stream << controls_.SaveBindings();
+        if (!stream) throw std::runtime_error("cannot write "+bindings.string());
+    } catch (const std::exception& error) {
+        std::cerr << "Settings not saved: " << error.what() << '\n';
+        toasts_.Show(std::string("Settings not saved: ")+error.what(),5);
+    }
+}
+
+void BackroomsGame::BuildMenus() {
+    using CnaEngine::UI::Menu;
+    pauseMenu_=std::make_shared<Menu>("Paused");
+    settingsMenu_=std::make_shared<Menu>("Settings");
+    pauseMenu_->Button("Resume",[this] { CloseMenus(); });
+    pauseMenu_->Button("Settings",[this] { menus_.Push(settingsMenu_); });
+    pauseMenu_->Button("Back to the start",[this] { Respawn(); CloseMenus(); });
+#ifndef __EMSCRIPTEN__
+    // A page in a browser has nothing to quit to.
+    pauseMenu_->Button("Quit",[this] { Exit(); });
+#endif
+    settingsMenu_->Label("Sound");
+    settingsMenu_->Slider("Volume",0,1,0.1f,Audio::SoundEffect::getMasterVolumeProperty(),
+                          [](float volume) { Audio::SoundEffect::setMasterVolumeProperty(volume); });
+    settingsMenu_->Label("View");
+    settingsMenu_->Slider("Look sensitivity",0.25f,3,0.25f,lookSensitivity_,
+                          [this](float value) { lookSensitivity_=value; });
+    if (shadowMap_)
+        settingsMenu_->Choice("Creature shadows",{"Off","On"},shadows_ ? 1 : 0,
+                              [this](int choice) { shadows_=choice==1; });
+    else
+        settingsMenu_->Label("Creature shadows: not on this device");
+    settingsMenu_->Label("Keys");
+    rebind_=std::make_unique<CnaEngine::UI::RebindRows>(*settingsMenu_,controls_,
+        std::vector<CnaEngine::Input::ActionId>{runToggle_,respawn_});
+    settingsMenu_->Button("Back",[this] { menus_.Pop(); });
+}
+
+void BackroomsGame::OpenPauseMenu() {
+    SetMouseCaptured(false);
+    pauseMenu_->Select(0);
+    menus_.Push(pauseMenu_);
+}
+
+void BackroomsGame::CloseMenus() {
+    menus_.Clear();
+    SetMouseCaptured(true);
+}
+
+void BackroomsGame::UpdateMenus(const CnaEngine::Input::InputSnapshot& input) {
+    if (rebind_->Listening()) {
+        (void)rebind_->Update(input); // the next key becomes the binding
+        return;
+    }
+    const bool inSettings=menus_.Top()==settingsMenu_.get();
+    const auto pointer=painter_->ToVirtual(Vector2(static_cast<float>(input.mouse.getXProperty()),
+                                                   static_cast<float>(input.mouse.getYProperty())));
+    menus_.Update(CnaEngine::UI::ReadMenuInput(controls_,menuActions_,pointer,controls_.Pressed(recapture_)));
+    // Leaving the settings, by Back or Escape, keeps them.
+    if (inSettings && menus_.Top()!=settingsMenu_.get()) SavePreferences();
+    if (menus_.Empty()) SetMouseCaptured(true);
 }
 
 void BackroomsGame::UpdateEntityAudio(float seconds,double elapsed) {
@@ -1849,36 +1961,29 @@ void BackroomsGame::Update(GameTime& time) {
     // is active, and a click that activates the window also recaptures it.
     const auto input=CnaEngine::Input::InputSnapshot::Capture();
     controls_.Update(input);
+    toasts_.Update(static_cast<float>(dt));
+    if (!menus_.Empty()) UpdateMenus(input);
+    else if (controls_.Pressed(pause_)) OpenPauseMenu();
+    if (!menus_.Empty()) {
+        // The world stands still behind the menu.
+        Stream();
+        UpdateTitle(dt);
+        Game::Update(time);
+        return;
+    }
+    worldSeconds_+=dt;
     if (controls_.Pressed(runToggle_))
         running_=!running_;
-    if (controls_.Pressed(releaseMouse_)) {
-        if (captured_) {
-            captured_=false;
-            Mouse::setIsRelativeMouseModeEXTProperty(false);
-            setIsMouseVisibleProperty(true);
-        }
-#ifndef __EMSCRIPTEN__
-        // A page in a browser has nothing to quit to: there Escape only
-        // releases the mouse.
-        else Exit();
-#endif
-    }
     const auto& mouse=input.mouse;
-    const bool recaptured=!captured_ && controls_.Held(recapture_);
-    if (recaptured) {
-        captured_=true;
-        Mouse::setIsRelativeMouseModeEXTProperty(true);
-        setIsMouseVisibleProperty(false);
-    }
+    if (!captured_ && controls_.Held(recapture_)) SetMouseCaptured(true);
     if (captured_ && getIsActiveProperty()) {
         // CNA/SDL reports positive relative X for physical movement to the right.
         // With this camera's +Z forward convention, decreasing yaw looks right.
-        // The click frame still contains absolute coordinates from before
-        // capture. Consuming them as a delta made the camera jump on recapture.
-        if (!recaptured) {
-            yaw_ -= mouse.getXProperty()*0.0022f;
-            pitch_=std::clamp(pitch_-mouse.getYProperty()*0.0022f,-1.43f,1.43f);
+        if (!skipMouseDelta_) {
+            yaw_ -= mouse.getXProperty()*0.0022f*lookSensitivity_;
+            pitch_=std::clamp(pitch_-mouse.getYProperty()*0.0022f*lookSensitivity_,-1.43f,1.43f);
         }
+        skipMouseDelta_=false;
         double forward=controls_.Axis(moveAxis_);
         double strafe=controls_.Axis(strafeAxis_);
         const double length=std::hypot(forward,strafe);
@@ -1902,17 +2007,12 @@ void BackroomsGame::Update(GameTime& time) {
             }
         }
     }
-    if (controls_.Pressed(respawn_)) {
-        x_=2.5; z_=2.5;
-        yaw_=world_.level==2 ? 0.0f : 1.5707963f;
-        pitch_=0;
-        stepDistance_=0;
-    }
+    if (controls_.Pressed(respawn_)) Respawn();
     const auto portal=PortalTarget(world_,x_,z_);
     if (portal && !insidePortal_) Transition(*portal);
     insidePortal_=portal.has_value();
     Stream();
-    UpdateEntityAudio(static_cast<float>(time.getTotalGameTimeProperty().getTotalSecondsProperty()),dt);
+    UpdateEntityAudio(static_cast<float>(worldSeconds_),dt);
     UpdateTitle(dt);
     Game::Update(time);
 }
@@ -1984,7 +2084,7 @@ void BackroomsGame::Draw(const GameTime& time) {
     const auto drawStart=Clock::now();
     auto& device=getGraphicsDeviceProperty();
     const float seconds=!capturePath_.empty() ? captureSeconds_ : static_cast<float>(
-        time.getTotalGameTimeProperty().getTotalSecondsProperty());
+        streamTest_ ? time.getTotalGameTimeProperty().getTotalSecondsProperty() : worldSeconds_);
     PlaceCreatures(seconds);
     // The shadow map before the clear: drawing into it leaves the back
     // buffer undefined. Without casters the chunks draw unlit, as baked.
@@ -2092,6 +2192,12 @@ void BackroomsGame::Draw(const GameTime& time) {
         effect_->setAlphaProperty(1);
         device.setBlendStateProperty(BlendState::Opaque);
         device.setDepthStencilStateProperty(DepthStencilState::Default);
+    }
+    if (!menus_.Empty() || toasts_.Count()>0) {
+        painter_->Begin();
+        menus_.Draw(*painter_,*font_);
+        toasts_.Draw(*painter_,*font_);
+        painter_->End();
     }
     Game::Draw(time);
     drawWorkMs_=std::chrono::duration<double,std::milli>(Clock::now()-drawStart).count();

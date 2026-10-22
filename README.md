@@ -26,7 +26,7 @@ The build copies assets beside the executable, so the game can be launched from 
 
 ### Browser build
 
-The same game runs in a browser through Emscripten: CNA's `WEBGL2` renderer (EasyGL over WebGL 2), SDL3 for input and audio, and `assets/` preloaded at `/assets`. The only browser-specific behaviour is that Escape releases the mouse but does not quit, since a page has nothing to quit to.
+The same game runs in a browser through Emscripten: CNA's `WEBGL2` renderer (EasyGL over WebGL 2), SDL3 for input and audio, and `assets/` preloaded at `/assets`. The only browser-specific behaviour is that the pause menu has no Quit, since a page has nothing to quit to.
 
 ```sh
 tools/build_web.sh            # configure (first time), build, package into build-consumer/web-package/
@@ -59,8 +59,16 @@ package, not a fully self-contained distribution for every Linux version.
 | W/A/S/D | Move |
 | Shift | Toggle walking and running |
 | R | Return to the current level's spawn |
-| Escape | Release mouse; press again to quit |
-| Left click | Recapture mouse |
+| Escape | Pause menu (Resume, Settings, Back to the start, Quit); in a menu, back |
+| Arrows, Enter, mouse | Choose in menus |
+| Left click | Recapture mouse (after the browser released it) |
+
+The world stands still while the menu is open. Settings holds the volume, look
+sensitivity, creature shadows and the Shift and R keys (Enter on a row, then
+the new key; Escape keeps the old one). They are kept in
+`~/.config/cna-backrooms/settings.ini` and `bindings.ini` (`$XDG_CONFIG_HOME`
+when set); captures and the streaming test do not read them. The menus are
+cna-engine's (`CnaEngine::UI`).
 
 Narrow, framed maintenance entrances with recessed dim interiors are level transitions. From the Level 0 spawn, one is about 15 metres ahead. From the Level 1 spawn, the return entrance is about 15 metres to the right and the Level 2 entrance is about 15 metres ahead. Level 2's return entrance is about 15 metres ahead. Rare additional entrances can be found far from the origin. Walking into an entrance changes level immediately.
 

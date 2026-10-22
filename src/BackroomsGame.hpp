@@ -5,6 +5,7 @@
 
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -19,6 +20,7 @@
 #include "Microsoft/Xna/Framework/Graphics/BlendState.hpp"
 #include "Microsoft/Xna/Framework/Graphics/VertexBuffer.hpp"
 
+#include "CnaEngine/Core/SettingsFile.hpp"
 #include "CnaEngine/Diagnostics/FrameStatistics.hpp"
 #include "CnaEngine/Graphics/Camera.hpp"
 #include "CnaEngine/Graphics/ForwardRenderer.hpp"
@@ -27,6 +29,11 @@
 #include "CnaEngine/Graphics/RenderQueue.hpp"
 #include "CnaEngine/Graphics/ShadowMap.hpp"
 #include "CnaEngine/Input/ActionMap.hpp"
+#include "CnaEngine/Input/InputSnapshot.hpp"
+#include "CnaEngine/UI/Font.hpp"
+#include "CnaEngine/UI/Menu.hpp"
+#include "CnaEngine/UI/Painter.hpp"
+#include "CnaEngine/UI/SettingsMenu.hpp"
 
 namespace Backrooms {
 
@@ -52,7 +59,7 @@ public:
     // Creatures' shadows from the ceiling light (on unless switched off here
     // or in the settings; devices that cannot sample a shadow map keep the
     // contact spots).
-    void SetShadows(bool enabled) { shadows_=enabled; }
+    void SetShadows(bool enabled) { shadows_=enabled; shadowsFromCommandLine_=true; }
     const std::string& GetTypeName() const override;
     void Initialize() override;
     void LoadContent() override;
@@ -125,11 +132,30 @@ private:
     // relative motion CNA reports directly.
     CnaEngine::Input::ActionMap controls_;
     CnaEngine::Input::AxisId moveAxis_ = 0, strafeAxis_ = 0;
-    CnaEngine::Input::ActionId runToggle_ = 0, releaseMouse_ = 0, respawn_ = 0, recapture_ = 0;
+    CnaEngine::Input::ActionId runToggle_ = 0, pause_ = 0, respawn_ = 0, recapture_ = 0;
+    // Escape pauses into cna-engine's menus; the world (creatures, their
+    // sounds) stands still while one is open.
+    std::unique_ptr<CnaEngine::UI::Painter> painter_;
+    std::unique_ptr<CnaEngine::UI::BuiltInFont> font_;
+    CnaEngine::UI::MenuActions menuActions_;
+    CnaEngine::UI::MenuStack menus_;
+    std::shared_ptr<CnaEngine::UI::Menu> pauseMenu_, settingsMenu_;
+    std::unique_ptr<CnaEngine::UI::RebindRows> rebind_;
+    CnaEngine::UI::Toasts toasts_;
+    double worldSeconds_ = 0;
+    // The player's settings and key bindings (settings.ini, bindings.ini in
+    // the user's configuration directory); captures and the streaming sweep
+    // neither read nor write them.
+    CnaEngine::SettingsFile preferences_;
+    std::filesystem::path preferencesPath_;
+    float lookSensitivity_ = 1;
+    bool shadowsFromCommandLine_ = false;
     double x_ = 2.5, z_ = 2.5;
     float yaw_ = 1.5707963f, pitch_ = 0;
     float verticalFovDegrees_ = kDefaultVerticalFov;
     bool captured_ = false;
+    // The first frame after capturing the mouse still reports where it was.
+    bool skipMouseDelta_ = false;
     bool running_ = false;
     double walkSpeed_ = kDefaultWalkSpeed;
     double runSpeed_ = kDefaultRunSpeed;
@@ -159,6 +185,14 @@ private:
     void BuildChunk(ChunkCoord coord);
     void BuildEntityMesh();
     void PlaceCreatures(float seconds);
+    void SetMouseCaptured(bool captured);
+    void Respawn();
+    void LoadPreferences();
+    void SavePreferences();
+    void BuildMenus();
+    void OpenPauseMenu();
+    void CloseMenus();
+    void UpdateMenus(const CnaEngine::Input::InputSnapshot& input);
     bool RenderShadowMap();
     void UpdateEntityAudio(float seconds,double elapsed);
     std::unique_ptr<Microsoft::Xna::Framework::Graphics::VertexBuffer>

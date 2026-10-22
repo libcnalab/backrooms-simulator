@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check native relative mouse directions, Shift modes and Escape capture on a QA display."""
+"""Check native relative mouse directions, Shift modes and the Escape pause menu on a QA display."""
 import argparse
 import json
 import math
@@ -19,7 +19,8 @@ def main():
     output = (root / args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    env.update(SDL_VIDEODRIVER='x11', SDL_AUDIODRIVER='dummy')
+    # Fresh settings: a player's saved look sensitivity would change the angles.
+    env.update(SDL_VIDEODRIVER='x11', SDL_AUDIODRIVER='dummy', XDG_CONFIG_HOME=str(output / 'config'))
     states = []
 
     def xdo(*arguments):
@@ -90,29 +91,32 @@ def main():
             before = state('released_mouse')
             xdo('mousemove_relative', '--', 90, 0)
             if state('released_motion')['angles'] != before['angles']:
-                raise RuntimeError('Escape did not release mouse look')
+                raise RuntimeError('Escape did not open the menu and release mouse look')
             xdo('mousemove', '--window', window, 640, 360)
-            xdo('mousedown', '1')
-            time.sleep(.12)
-            xdo('mouseup', '1')
+            subprocess.run(['import', '-window', window, str(output / 'menu.png')],
+                           check=True, timeout=10)
+            key('Escape')
             released = before
             before = state('recaptured_mouse')
             if before['angles'] != released['angles']:
-                raise RuntimeError('recapture consumed absolute mouse coordinates as a delta')
+                raise RuntimeError('resuming consumed absolute mouse coordinates as a delta')
             xdo('mousemove_relative', '--', 90, 0)
             after = state('recaptured_motion')
             if abs(math.remainder(after['angles'][0] - before['angles'][0], 360)
                    + math.degrees(90 * .0022)) > .3:
-                raise RuntimeError('click did not recapture mouse look')
+                raise RuntimeError('a second Escape did not resume mouse look')
             subprocess.run(['import', '-window', window, str(output / 'controls.png')],
                            check=True, timeout=10)
+            # Quit from the pause menu: Resume, Settings, Back to the start, Quit.
             key('Escape')
             time.sleep(.2)
-            key('Escape')
+            for name in ('Down', 'Down', 'Down', 'Return'):
+                key(name)
+                time.sleep(.2)  # released for a few frames: separate presses
             if game.wait(timeout=5) != 0:
-                raise RuntimeError('Escape exit failed')
+                raise RuntimeError('Quit from the menu failed')
             (output / 'summary.json').write_text(json.dumps(states, indent=2) + '\n')
-            print('Conventional mouse look, walk/run toggle and capture/exit passed.', flush=True)
+            print('Conventional mouse look, walk/run toggle, pause menu and quit passed.', flush=True)
         finally:
             if game.poll() is None:
                 xdo('keyup', 'w', 'Shift_L', 'Shift_R')
