@@ -22,13 +22,14 @@ set(CNA_PLATFORM_RATCHET OFF CACHE BOOL "Engine developer SDL-coupling audits" F
 set(CNA_SHARED_LIBRARY OFF CACHE BOOL "CNA as one shared library" FORCE)
 add_subdirectory("${CNA_ROOT_DIR}" CNA_BUILD)
 sharp_runtime_enable_component(Text.Json)
-# cna-engine's strict modules (CnaEngine::Core, CnaEngine::Graphics) over the
-# CNA just added: XNA 4.0 types only. A new compiler warning inside the engine
-# must not break this game's build.
+# cna-engine over the CNA just added: the strict modules (XNA 4.0 types only)
+# for drawing and menus, and its enhanced graphics for shadow reception (CNA's
+# shadow extension). A new compiler warning inside the engine must not break
+# this game's build.
 set(CNA_ENGINE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CNA_ENGINE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CNA_ENGINE_WITH_EXTENDED OFF CACHE BOOL "" FORCE)
-set(CNA_ENGINE_WITH_ENHANCED_GRAPHICS OFF CACHE BOOL "" FORCE)
+set(CNA_ENGINE_WITH_ENHANCED_GRAPHICS ON CACHE BOOL "" FORCE)
 set(CNA_ENGINE_INSTALL OFF CACHE BOOL "" FORCE)
 set(CNA_ENGINE_PILOT_PROBES OFF CACHE BOOL "" FORCE)
 set(CNA_ENGINE_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
@@ -75,7 +76,8 @@ else()
     add_dependencies(cna_backrooms backrooms_assets)
 endif()
 target_include_directories(cna_backrooms PRIVATE src)
-target_link_libraries(cna_backrooms PRIVATE CNA CnaEngine::Graphics backrooms_profiles)
+target_link_libraries(cna_backrooms PRIVATE CNA CnaEngine::Graphics CnaEngine::EnhancedGraphics CnaEngine::UI
+    backrooms_profiles)
 target_compile_options(cna_backrooms PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(world_tests tests/WorldTests.cpp)
 target_link_libraries(world_tests PRIVATE backrooms_world)
